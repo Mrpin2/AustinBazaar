@@ -89,4 +89,105 @@ model_id = ""
 
 if use_secrets:
     if model_choice == "Google Gemini":
-        api_key = st.secrets.get("GEM
+        api_key = st.secrets.get("GEMINI_API_KEY")
+        model_id = st.secrets.get("GEMINI_MODEL_ID", "gemini-1.5-flash-latest")
+    elif model_choice == "OpenAI GPT":
+        api_key = st.secrets.get("OPENAI_API_KEY")
+        model_id = st.secrets.get("OPENAI_MODEL_ID", "gpt-4o")
+else:
+    if model_choice == "Google Gemini":
+        api_key = st.sidebar.text_input("Enter Gemini API Key:", type="password")
+        model_id = st.sidebar.text_input("Gemini Model ID:", "gemini-1.5-flash-latest")
+    elif model_choice == "OpenAI GPT":
+        api_key = st.sidebar.text_input("Enter OpenAI API Key:", type="password")
+        model_id = st.sidebar.text_input("OpenAI Model ID:", "gpt-4o")
+
+uploaded_files = st.file_uploader("Upload PDF invoices", type="pdf", accept_multiple_files=True)
+
+if st.button("Extract Invoice Details"):
+    if not api_key:
+        st.error("API key not found. Please configure in secrets or input manually.")
+    elif not uploaded_files:
+        st.warning("Please upload at least one PDF file.")
+    else:
+        for file in uploaded_files:
+            st.subheader(f"\U0001F4C4 {file.name}")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(file.read())
+                tmp_path = tmp_file.name
+
+            try:
+                extracted_data = None
+
+                with st.spinner("Processing invoice..."):
+                    if model_choice == "OpenAI GPT" and openai:
+                        openai.api_key = api_key
+                        images = convert_pdf_to_images(tmp_path)
+                        if not images:
+                            st.error("Failed to render PDF pages.")
+                            continue
+
+                        message_content = [{"type": "text", "text": INVOICE_EXTRACTION_PROMPT}] + [
+                            {"type": "image_url", "image_url": {"url": img, "detail": "high"}} for img in images
+                        ]
+
+                        response = openai.chat.completions.create(
+                            model=model_id,
+                            messages=[
+                                {"role": "system", "content": INVOICE_EXTRACTION_PROMPT},
+                                {"role": "user", "content": message_content}
+                            ]
+                        )
+
+                        raw_content = response.choices[0].message.content
+                        json_candidate = re.search(r"\{.*\}", raw_content, re.DOTALL)
+                        if json_candidate:
+                            try:
+                                extracted_data = json.loads(json_candidate.group())
+                            except json.JSONDecodeError:
+                                st.error("OpenAI returned invalid JSON.")
+                        else:
+                            st.error("No JSON object found in response.")
+
+                    elif model_choice == "Google Gemini" and genai:
+                        genai.configure(api_key=api_key)
+                        model = genai.GenerativeModel(model_id)
+                        file_resource = genai.upload_file(path=tmp_path, display_name=file.name)
+                        response = model.generate_content(
+                            [INVOICE_EXTRACTION_PROMPT, file_resource],
+                            generation_config={"response_mime_type": "application/json"}
+                        )
+                        try:
+                            extracted_data = json.loads(response.text)
+                        except Exception:
+                            st.error("Could not parse Gemini response.")
+
+                # --- Display & Excel Export ---
+                if extracted_data:
+                    invoices = extracted_data.get("invoices") or []
+                    if isinstance(invoices, list):
+                        for invoice in invoices:
+                            st.markdown(f"**Seller:** {invoice.get('sellerName', 'N/A')}  ")
+                            st.markdown(f"**Buyer:** {invoice.get('buyerName', 'N/A')}  ")
+                            st.markdown(f"**Ship To:** {invoice.get('shipToName', 'N/A')}  ")
+
+                            line_items = invoice.get("lineItems", [])
+                            if isinstance(line_items, list) and line_items:
+                                df = pd.DataFrame(line_items)
+                                st.dataframe(df)
+
+                                excel_buffer = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+                                df.to_excel(excel_buffer.name, index=False)
+                                with open(excel_buffer.name, "rb") as f:
+                                    st.download_button(
+                                        label="\U0001F4C5 Download Line Items as Excel",
+                                        data=f.read(),
+                                        file_name=f"{file.name}_line_items.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+
+            except Exception as e:
+                st.error(f"Error processing {file.name}: {e}")
+
+            finally:
+                os.remove(tmp_path)
