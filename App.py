@@ -119,72 +119,73 @@ if st.button("Extract Invoice Details"):
             try:
                 extracted_data = None
 
-                if model_choice == "OpenAI GPT" and openai:
-                    openai.api_key = api_key
-                    images = convert_pdf_to_images(tmp_path)
-                    if not images:
-                        st.error("Failed to render PDF pages.")
-                        continue
+                with st.spinner("Processing invoice..."):
+                    if model_choice == "OpenAI GPT" and openai:
+                        openai.api_key = api_key
+                        images = convert_pdf_to_images(tmp_path)
+                        if not images:
+                            st.error("Failed to render PDF pages.")
+                            continue
 
-                    message_content = [{"type": "text", "text": INVOICE_EXTRACTION_PROMPT}] + [
-                        {"type": "image_url", "image_url": {"url": img, "detail": "high"}} for img in images
-                    ]
-
-                    response = openai.chat.completions.create(
-                        model=model_id,
-                        messages=[
-                            {"role": "system", "content": INVOICE_EXTRACTION_PROMPT},
-                            {"role": "user", "content": message_content}
+                        message_content = [{"type": "text", "text": INVOICE_EXTRACTION_PROMPT}] + [
+                            {"type": "image_url", "image_url": {"url": img, "detail": "high"}} for img in images
                         ]
-                    )
 
-                    raw_content = response.choices[0].message.content
-                    json_candidate = re.search(r"\{.*\}", raw_content, re.DOTALL)
-                    if json_candidate:
+                        response = openai.chat.completions.create(
+                            model=model_id,
+                            messages=[
+                                {"role": "system", "content": INVOICE_EXTRACTION_PROMPT},
+                                {"role": "user", "content": message_content}
+                            ]
+                        )
+
+                        raw_content = response.choices[0].message.content
+                        json_candidate = re.search(r"\{.*\}", raw_content, re.DOTALL)
+                        if json_candidate:
+                            try:
+                                extracted_data = json.loads(json_candidate.group())
+                            except json.JSONDecodeError:
+                                st.error("OpenAI returned invalid JSON.")
+                        else:
+                            st.error("No JSON object found in response.")
+
+                    elif model_choice == "Google Gemini" and genai:
+                        genai.configure(api_key=api_key)
+                        model = genai.GenerativeModel(model_id)
+                        file_resource = genai.upload_file(path=tmp_path, display_name=file.name)
+                        response = model.generate_content(
+                            [INVOICE_EXTRACTION_PROMPT, file_resource],
+                            generation_config={"response_mime_type": "application/json"}
+                        )
                         try:
-                            extracted_data = json.loads(json_candidate.group())
-                            st.json(extracted_data)
-                        except json.JSONDecodeError:
-                            st.error("OpenAI returned invalid JSON.")
-                            st.text(raw_content)
-                    else:
-                        st.error("No JSON object found in response.")
-                        st.text(raw_content)
+                            extracted_data = json.loads(response.text)
+                        except Exception:
+                            st.error("Could not parse Gemini response.")
 
-                elif model_choice == "Google Gemini" and genai:
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel(model_id)
-                    file_resource = genai.upload_file(path=tmp_path, display_name=file.name)
-                    response = model.generate_content(
-                        [INVOICE_EXTRACTION_PROMPT, file_resource],
-                        generation_config={"response_mime_type": "application/json"}
-                    )
-                    try:
-                        extracted_data = json.loads(response.text)
-                        st.json(extracted_data)
-                    except Exception:
-                        st.error("Could not parse Gemini response.")
-                        st.text(response.text)
-
-                else:
-                    st.error("Model client could not be initialized. Check API key and installation.")
-
-                # --- Excel Export ---
+                # --- Display & Excel Export ---
                 if extracted_data:
-                    line_items = extracted_data.get("Line Items") or extracted_data.get("line_items")
-                    if isinstance(line_items, list):
-                        df = pd.DataFrame(line_items)
-                        st.dataframe(df)
+                    invoices = extracted_data.get("invoices") or []
+                    if isinstance(invoices, list):
+                        for invoice in invoices:
+                            st.markdown(f"**Seller:** {invoice.get('sellerName', 'N/A')}  ")
+                            st.markdown(f"**Buyer:** {invoice.get('buyerName', 'N/A')}  ")
+                            st.markdown(f"**Ship To:** {invoice.get('shipToName', 'N/A')}  ")
 
-                        excel_buffer = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-                        df.to_excel(excel_buffer.name, index=False)
-                        with open(excel_buffer.name, "rb") as f:
-                            st.download_button(
-                                label="📥 Download Line Items as Excel",
-                                data=f.read(),
-                                file_name=f"{file.name}_line_items.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
+                            line_items = invoice.get("lineItems", [])
+                            if isinstance(line_items, list) and line_items:
+                                df = pd.DataFrame(line_items)
+                                st.dataframe(df)
+
+                                if model_choice == "OpenAI GPT":
+                                    excel_buffer = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+                                    df.to_excel(excel_buffer.name, index=False)
+                                    with open(excel_buffer.name, "rb") as f:
+                                        st.download_button(
+                                            label="📥 Download Line Items as Excel",
+                                            data=f.read(),
+                                            file_name=f"{file.name}_line_items.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                        )
 
             except Exception as e:
                 st.error(f"Error processing {file.name}: {e}")
