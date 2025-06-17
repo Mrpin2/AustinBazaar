@@ -56,7 +56,7 @@ INVOICE_EXTRACTION_PROMPT = (
 
 # --- Main App ---
 st.set_page_config(page_title="US Invoice Extractor", layout="wide")
-st.title("\ud83d\udcc4 US Equipment Invoice Extractor")
+st.title("📄 US Equipment Invoice Extractor")
 
 st.markdown("""
 This app extracts structured data from US equipment-related invoices.
@@ -110,7 +110,7 @@ if st.button("Extract Invoice Details"):
         st.warning("Please upload at least one PDF file.")
     else:
         for file in uploaded_files:
-            st.subheader(f"\ud83d\udcc4 {file.name}")
+            st.subheader(f"📄 {file.name}")
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(file.read())
                 tmp_path = tmp_file.name
