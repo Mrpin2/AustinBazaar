@@ -52,7 +52,7 @@ INVOICE_EXTRACTION_PROMPT = (
     "Extract the following details from each invoice in the images: "
     "File Name, Seller Name, Seller Address, Buyer Name, Buyer Address, Ship To Name, Ship To Address, "
     "Line Items (with description, SKU if available, quantity, amount). "
-    "Return data as JSON. If anything is missing, use null."
+    "Return ONLY the JSON. No explanation or comments. If anything is missing, use null."
 )
 
 # --- Main App ---
@@ -131,23 +131,33 @@ if st.button("Extract Invoice Details"):
                             {"type": "image_url", "image_url": {"url": img, "detail": "high"}} for img in images
                         ]
 
-                        response = openai.chat.completions.create(
-                            model=model_id,
-                            messages=[
-                                {"role": "system", "content": INVOICE_EXTRACTION_PROMPT},
-                                {"role": "user", "content": message_content}
-                            ]
-                        )
+                        try:
+                            response = openai.chat.completions.create(
+                                model=model_id,
+                                messages=[
+                                    {"role": "system", "content": INVOICE_EXTRACTION_PROMPT},
+                                    {"role": "user", "content": message_content}
+                                ]
+                            )
 
-                        raw_content = response.choices[0].message.content
-                        json_candidate = re.search(r"\{.*\}", raw_content, re.DOTALL)
-                        if json_candidate:
+                            raw_content = response.choices[0].message.content.strip()
+
+                            # Try direct load
                             try:
-                                extracted_data = json.loads(json_candidate.group())
+                                extracted_data = json.loads(raw_content)
                             except json.JSONDecodeError:
-                                st.error("OpenAI returned invalid JSON.")
-                        else:
-                            st.error("No JSON object found in response.")
+                                # Try to extract a block of JSON from within
+                                json_candidate = re.search(r"\{.*\}", raw_content, re.DOTALL)
+                                if json_candidate:
+                                    try:
+                                        extracted_data = json.loads(json_candidate.group())
+                                    except json.JSONDecodeError:
+                                        st.error("OpenAI returned invalid JSON (even after regex cleanup).")
+                                else:
+                                    st.error("OpenAI response did not contain a JSON object.")
+
+                        except Exception as e:
+                            st.error(f"OpenAI API error: {e}")
 
                     elif model_choice == "Google Gemini" and genai:
                         genai.configure(api_key=api_key)
