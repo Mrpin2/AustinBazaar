@@ -4,6 +4,7 @@ import tempfile
 import os
 import json
 import base64
+import pandas as pd
 from datetime import datetime
 import re
 
@@ -116,6 +117,8 @@ if st.button("Extract Invoice Details"):
                 tmp_path = tmp_file.name
 
             try:
+                extracted_data = None
+
                 if model_choice == "OpenAI GPT" and openai:
                     openai.api_key = api_key
                     images = convert_pdf_to_images(tmp_path)
@@ -139,7 +142,8 @@ if st.button("Extract Invoice Details"):
                     json_candidate = re.search(r"\{.*\}", raw_content, re.DOTALL)
                     if json_candidate:
                         try:
-                            st.json(json.loads(json_candidate.group()))
+                            extracted_data = json.loads(json_candidate.group())
+                            st.json(extracted_data)
                         except json.JSONDecodeError:
                             st.error("OpenAI returned invalid JSON.")
                             st.text(raw_content)
@@ -156,13 +160,31 @@ if st.button("Extract Invoice Details"):
                         generation_config={"response_mime_type": "application/json"}
                     )
                     try:
-                        st.json(json.loads(response.text))
+                        extracted_data = json.loads(response.text)
+                        st.json(extracted_data)
                     except Exception:
                         st.error("Could not parse Gemini response.")
                         st.text(response.text)
 
                 else:
                     st.error("Model client could not be initialized. Check API key and installation.")
+
+                # --- Excel Export ---
+                if extracted_data:
+                    line_items = extracted_data.get("Line Items") or extracted_data.get("line_items")
+                    if isinstance(line_items, list):
+                        df = pd.DataFrame(line_items)
+                        st.dataframe(df)
+
+                        excel_buffer = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+                        df.to_excel(excel_buffer.name, index=False)
+                        with open(excel_buffer.name, "rb") as f:
+                            st.download_button(
+                                label="📥 Download Line Items as Excel",
+                                data=f.read(),
+                                file_name=f"{file.name}_line_items.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
 
             except Exception as e:
                 st.error(f"Error processing {file.name}: {e}")
