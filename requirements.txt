@@ -3,3 +3,10 @@ pillow
 PyMuPDF
 openai
 google-generativeai
+streamlit
+openai
+google-generativeai
+pillow
+PyMuPDF
+pandas
+openpyxl
