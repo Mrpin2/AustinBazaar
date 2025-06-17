@@ -5,6 +5,7 @@ import os
 import json
 import base64
 from datetime import datetime
+import re
 
 try:
     import fitz  # PyMuPDF
@@ -15,12 +16,12 @@ except ImportError:
     Image = None
 
 try:
-    from openai import OpenAI
+    import openai
 except ImportError:
-    OpenAI = None
+    openai = None
 
 try:
-    from google import genai
+    import google.generativeai as genai
 except ImportError:
     genai = None
 
@@ -88,75 +89,4 @@ if use_secrets:
         model_id = st.secrets.get("GEMINI_MODEL_ID", "gemini-1.5-flash-latest")
     elif model_choice == "OpenAI GPT":
         api_key = st.secrets.get("OPENAI_API_KEY")
-        model_id = st.secrets.get("OPENAI_MODEL_ID", "gpt-4o")
-else:
-    if model_choice == "Google Gemini":
-        api_key = st.sidebar.text_input("Enter Gemini API Key:", type="password")
-        model_id = st.sidebar.text_input("Gemini Model ID:", "gemini-1.5-flash-latest")
-    elif model_choice == "OpenAI GPT":
-        api_key = st.sidebar.text_input("Enter OpenAI API Key:", type="password")
-        model_id = st.sidebar.text_input("OpenAI Model ID:", "gpt-4o")
-
-uploaded_files = st.file_uploader("Upload PDF invoices", type="pdf", accept_multiple_files=True)
-
-if st.button("Extract Invoice Details"):
-    if not api_key:
-        st.error("API key not found. Please configure in secrets or input manually.")
-    elif not uploaded_files:
-        st.warning("Please upload at least one PDF file.")
-    else:
-        for file in uploaded_files:
-            st.subheader(f"📄 {file.name}")
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(file.read())
-                tmp_path = tmp_file.name
-
-            try:
-                if model_choice == "OpenAI GPT" and OpenAI:
-                    client = OpenAI(api_key=api_key)
-                    images = convert_pdf_to_images(tmp_path)
-                    if not images:
-                        st.error("Failed to render PDF pages.")
-                        continue
-
-                    message_content = [{"type": "text", "text": INVOICE_EXTRACTION_PROMPT}] + [
-                        {"type": "image_url", "image_url": {"url": img, "detail": "high"}} for img in images
-                    ]
-
-                    response = client.chat.completions.create(
-                        model=model_id,
-                        messages=[
-                            {"role": "system", "content": INVOICE_EXTRACTION_PROMPT},
-                            {"role": "user", "content": message_content}
-                        ]
-                    )
-
-                    raw_json = response.choices[0].message.content
-                    try:
-                        st.json(json.loads(raw_json))
-                    except json.JSONDecodeError:
-                        st.error("Failed to parse JSON response from OpenAI.")
-                        st.text(raw_json)
-
-                elif model_choice == "Google Gemini" and genai:
-                    client = genai.Client(api_key=api_key)
-                    file_resource = client.files.upload(file=tmp_path, config={'display_name': file.name})
-                    response = client.models.generate_content(
-                        model=model_id,
-                        contents=[INVOICE_EXTRACTION_PROMPT, file_resource],
-                        config={"response_mime_type": "application/json"}
-                    )
-                    try:
-                        st.json(json.loads(response.candidates[0].content.parts[0].text))
-                    except Exception:
-                        st.error("Could not parse Gemini response.")
-                        st.text(response.candidates[0].content.parts[0].text)
-
-                else:
-                    st.error("Model client could not be initialized. Check API key and installation.")
-
-            except Exception as e:
-                st.error(f"Error processing {file.name}: {e}")
-
-            finally:
-                os.remove(tmp_path)
+        model_id = s
