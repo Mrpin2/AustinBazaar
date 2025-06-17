@@ -176,18 +176,19 @@ if st.button("Extract Invoice Details"):
                                 df = pd.DataFrame(line_items)
                                 st.dataframe(df)
 
-                                excel_buffer = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-                                df.to_excel(excel_buffer.name, index=False)
-                                with open(excel_buffer.name, "rb") as f:
-                                    st.download_button(
-                                        label="\U0001F4C5 Download Line Items as Excel",
-                                        data=f.read(),
-                                        file_name=f"{file.name}_line_items.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                    )
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_excel:
+                                    df.to_excel(tmp_excel.name, index=False)
+                                    tmp_excel.flush()
+                                    tmp_excel.seek(0)
+                                    with open(tmp_excel.name, "rb") as f:
+                                        st.download_button(
+                                            label="\U0001F4C5 Download Line Items as Excel",
+                                            data=f.read(),
+                                            file_name=f"{file.name}_line_items.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                        )
 
             except Exception as e:
                 st.error(f"Error processing {file.name}: {e}")
-
             finally:
                 os.remove(tmp_path)
