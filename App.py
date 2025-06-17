@@ -45,13 +45,23 @@ def convert_pdf_to_images(file_path):
         st.error(f"Failed to convert PDF to images: {e}")
     return images
 
-# --- Prompts ---
-INVOICE_EXTRACTION_PROMPT = (
-    "Extract the following details from each invoice in the images: "
-    "File Name, Seller Name, Seller Address, Buyer Name, Buyer Address, Ship To Name, Ship To Address, "
-    "Line Items (with description, SKU if available, quantity, amount). "
-    "Return data as JSON. If anything is missing, use null."
-)
+# --- Prompt Builder ---
+def build_prompt(include_extra):
+    if include_extra:
+        return (
+            "Extract all relevant invoice details you can find from the images. This includes, but is not limited to: "
+            "File Name, Invoice Number, Invoice Date, Seller Name, Seller Address, Buyer Name, Buyer Address, "
+            "Ship To Name, Ship To Address, Payment Terms, Shipping Method, Contact Info, PO Number, "
+            "Line Items (with description, SKU if available, quantity, unit price, total, discount), Subtotal, Tax, Total Amount. "
+            "Return structured data as JSON. If any detail is missing, use null."
+        )
+    else:
+        return (
+            "Extract the following details from each invoice in the images: "
+            "File Name, Seller Name, Seller Address, Buyer Name, Buyer Address, Ship To Name, Ship To Address, "
+            "Line Items (with description, SKU if available, quantity, amount). "
+            "Return data as JSON. If anything is missing, use null."
+        )
 
 # --- Main App ---
 st.set_page_config(page_title="US Invoice Extractor", layout="wide")
@@ -60,12 +70,7 @@ st.title("📄 US Equipment Invoice Extractor")
 st.markdown("""
 This app extracts structured data from US equipment-related invoices.
 
-**Extracted Fields:**
-- File Name
-- Seller Name and Address
-- Buyer Name and Address
-- Ship To Name and Address
-- All line items with SKU, Quantity, Amount
+**You can choose to extract basic fields or let AI extract all possible fields it can detect.**
 """)
 
 st.sidebar.header("Configuration")
@@ -81,6 +86,7 @@ if admin_input:
         st.sidebar.error("Incorrect admin password.")
 
 model_choice = st.sidebar.radio("Choose AI Model:", ("Google Gemini", "OpenAI GPT"))
+include_extra_fields = st.sidebar.checkbox("Extract All Relevant Fields (AI-decided)", value=False)
 
 if use_secrets:
     if model_choice == "Google Gemini":
@@ -105,6 +111,7 @@ if st.button("Extract Invoice Details"):
     elif not uploaded_files:
         st.warning("Please upload at least one PDF file.")
     else:
+        prompt = build_prompt(include_extra_fields)
         for file in uploaded_files:
             st.subheader(f"📄 {file.name}")
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
@@ -119,14 +126,14 @@ if st.button("Extract Invoice Details"):
                         st.error("Failed to render PDF pages.")
                         continue
 
-                    message_content = [{"type": "text", "text": INVOICE_EXTRACTION_PROMPT}] + [
+                    message_content = [{"type": "text", "text": prompt}] + [
                         {"type": "image_url", "image_url": {"url": img, "detail": "high"}} for img in images
                     ]
 
                     response = client.chat.completions.create(
                         model=model_id,
                         messages=[
-                            {"role": "system", "content": INVOICE_EXTRACTION_PROMPT},
+                            {"role": "system", "content": prompt},
                             {"role": "user", "content": message_content}
                         ],
                         response_format="json"
@@ -140,7 +147,7 @@ if st.button("Extract Invoice Details"):
                     file_resource = client.files.upload(file=tmp_path, config={'display_name': file.name})
                     response = client.models.generate_content(
                         model=model_id,
-                        contents=[INVOICE_EXTRACTION_PROMPT, file_resource],
+                        contents=[prompt, file_resource],
                         config={"response_mime_type": "application/json"}
                     )
                     st.json(response.candidates[0].content.parts[0].text)
